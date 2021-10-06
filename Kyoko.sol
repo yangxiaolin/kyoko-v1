@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity >=0.6.8 <0.9.0;
+pragma solidity 0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -180,6 +180,8 @@ contract Kyoko is Ownable, ERC721Holder {
 
     event SetFee(uint256 _fee);
 
+    event SetPause(bool _Pause);
+
     constructor(BorrowToken _bToken, LenderToken _lToken) {
         bToken = _bToken;
         lToken = _lToken;
@@ -208,12 +210,13 @@ contract Kyoko is Ownable, ERC721Holder {
         _;
     }
 
-    function setPause(bool _pause) public onlyOwner {
+    function setPause(bool _pause) external onlyOwner {
         pause = _pause;
+        emit SetPause(_pause)
     }
 
-    function setWhiteList(address[] memory _whiteList)
-        public
+    function setWhiteList(address[] calldata _whiteList)
+        external
         isPause
         onlyOwner
     {
@@ -221,12 +224,12 @@ contract Kyoko is Ownable, ERC721Holder {
         emit SetWhiteList(_whiteList);
     }
 
-    function setFee(uint256 _fee) public isPause onlyOwner {
+    function setFee(uint256 _fee) external isPause onlyOwner {
         fee = _fee;
         emit SetFee(_fee);
     }
 
-    function addWhiteList(address _address) public isPause onlyOwner {
+    function addWhiteList(address _address) external isPause onlyOwner {
         whiteList.push(_address);
         emit AddWhiteList(_address);
     }
@@ -254,7 +257,7 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 _buffering,
         address _erc20Token,
         string memory _description
-    ) public isPause checkWhiteList(_erc20Token) {
+    ) external isPause checkWhiteList(_erc20Token) {
         require(IERC721(_nftToken) != bToken); // btoken => No
         require(
             IERC721(_nftToken).supportsInterface(0x80ac58cd),
@@ -303,9 +306,9 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 _buffering,
         address _erc20Token,
         string memory _description
-    ) public {
+    ) external isPause checkWhiteList(_erc20Token){
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
-        require(_nft.holder == msg.sender && !_nft.marks.isBorrow);
+        require(bToken.ownerOf(_nft.bTokenId) == msg.sender, 'Not bToken owner');
         // change collateral status
         _nft.collateral.apy = _apy;
         _nft.collateral.price = _price;
@@ -324,7 +327,7 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 _period,
         uint256 _buffering,
         address _erc20Token
-    ) public isPause checkWhiteList(_erc20Token) {
+    ) external isPause checkWhiteList(_erc20Token) {
         NFT memory _nft = NftMap[_nftToken][_nftTokenId];
         require(!_nft.marks.isBorrow, "This collateral already borrowed");
         OFFER memory _offer = OfferMap[_nftToken][_nftTokenId][msg.sender];
@@ -362,14 +365,16 @@ contract Kyoko is Ownable, ERC721Holder {
         isPause
     {
         OFFER storage _offer = OfferMap[_nftToken][_nftTokenId][msg.sender];
+        // Verify token owner
+        require(lToken.ownerOf(_offer.lTokenId) == msg.sender, 'Not lToken owner');
+        lToken.burn(_offer.lTokenId);
         require(
             _offer.symbol && !_offer.accept,
-            "This offer already has accept."
+            "This offer already has accepted."
         );
         _offer.accept = false;
         _offer.symbol = false;
         uint256 _price = _offer.price.mul(10000 + fee).div(10000);
-        lToken.burn(_offer.lTokenId);
         IERC20(_offer.erc20Token).safeTransfer(msg.sender, _price);
         emit CancelOffer(_nftToken, _nftTokenId, msg.sender, _offer);
     }
@@ -378,10 +383,11 @@ contract Kyoko is Ownable, ERC721Holder {
         address _nftToken,
         uint256 _nftTokenId,
         address _lender
-    ) public isPause {
+    ) external isPause {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
         OFFER storage _offer = OfferMap[_nftToken][_nftTokenId][_lender];
-        require(_nft.holder == msg.sender && !_nft.marks.isBorrow);
+        require(bToken.ownerOf(_nft.bTokenId) == msg.sender, 'Not bToken owner');
+        require(!_nft.marks.isBorrow, 'This collateral already borrowed');
         require(!_offer.accept && _offer.symbol, "This Offer out of date");
         // change offer status
         _offer.accept = true;
@@ -403,7 +409,7 @@ contract Kyoko is Ownable, ERC721Holder {
         address _nftToken,
         uint256 _nftTokenId,
         uint256 _amount
-    ) public isPause {
+    ) external isPause {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
         address _erc20Token = _nft.collateral.erc20Token;
         require(!_nft.marks.isBorrow, "This collateral already borrowed");
@@ -445,13 +451,14 @@ contract Kyoko is Ownable, ERC721Holder {
         address _nftToken,
         uint256 _nftTokenId,
         uint256 _amount
-    ) public {
+    ) external {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
+        require(_nft.marks.isBorrow, "This collateral is not borrowed");
         // get repay amount
         uint256 _repayAmount = calcInterestRate(_nftToken, _nftTokenId, true);
         require(_amount >= _repayAmount, "Wrong amount.");
-        require(!_nft.marks.isRepay, "This debt has been clear");
-        require(!_nft.marks.liquidate, "This debt has been liquidating");
+        require(!_nft.marks.isRepay, "This debt already Cleared");
+        require(!_nft.marks.liquidate, "This debt already liquidated");
         IERC20(_nft.collateral.erc20Token).safeTransferFrom(
             address(msg.sender),
             address(this),
@@ -471,14 +478,16 @@ contract Kyoko is Ownable, ERC721Holder {
         emit Repay(_nftToken, _nftTokenId, _nft);
     }
 
-    function claimCollateral(address _nftToken, uint256 _nftTokenId) public {
+    function claimCollateral(address _nftToken, uint256 _nftTokenId) external {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
+        // Verify token owner
+        require(bToken.ownerOf(_nft.bTokenId) == msg.sender, 'Not bToken owner');
         require(
             !_nft.marks.isBorrow || _nft.marks.isRepay,
             "This debt is not repay"
         );
-        require(!_nft.marks.hasWithdraw, "This collateral has been withdraw");
-        require(!_nft.marks.liquidate, "This collateral has been liquidating");
+        require(!_nft.marks.hasWithdraw, "This collateral has been withdrawn");
+        require(!_nft.marks.liquidate, "This debt already liquidated");
         // burn bToken
         bToken.burn(_nft.bTokenId);
         // send collateral to msg.sender
@@ -491,9 +500,11 @@ contract Kyoko is Ownable, ERC721Holder {
         emit ClaimCollateral(_nftToken, _nftTokenId, msg.sender);
     }
 
-    function claimERC20(uint256 _lTokenId) public {
+    function claimERC20(uint256 _lTokenId) external {
         // check collateral status
         ASSETS storage _assets = AssetsMap[_lTokenId];
+        // Verify token owner
+        require(lToken.ownerOf(_assets.lTokenId) == msg.sender, 'Not lToken owner');
         require(_assets.repayAmount != 0, "This debt is not clear");
         require(!_assets.hasClaim, "Already claim assets");
         _assets.hasClaim = true;
@@ -508,46 +519,39 @@ contract Kyoko is Ownable, ERC721Holder {
     }
 
     function executeEmergency(address _nftToken, uint256 _nftTokenId)
-        public
+        external
         isPause
         checkCollateralStatus(_nftTokenId, _nftToken)
     {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
+        // Verify token owner
+        require(lToken.ownerOf(_nft.lTokenId) == msg.sender, 'Not lToken owner');
         uint256 time = _nft.borrowTimestamp;
         // An emergency can be triggered after collateral period
         require(
             (block.timestamp - time) > _nft.collateral.period,
             "Can do not execute emergency."
         );
-        // send lToken for verify
-        IERC721(lToken).safeTransferFrom(
-            msg.sender,
-            address(this),
-            _nft.lTokenId
-        );
         // set collateral emergency timestamp
         _nft.emergencyTimestamp = block.timestamp;
-        IERC721(lToken).safeTransferFrom(
-            address(this),
-            msg.sender,
-            _nft.lTokenId
-        );
         emit ExecuteEmergency(_nftToken, _nftTokenId, msg.sender);
     }
 
     function liquidate(address _nftToken, uint256 _nftTokenId)
-        public
+        external
         isPause
         checkCollateralStatus(_nftTokenId, _nftToken)
     {
         NFT storage _nft = NftMap[_nftToken][_nftTokenId];
+        // Verify token owner
+        require(lToken.ownerOf(_nft.lTokenId) == msg.sender, 'Not lToken owner');
+        // burn lToken
+        lToken.burn(_nft.lTokenId);
         uint256 _emerTime = _nft.emergencyTimestamp;
         require(
             (block.timestamp - _emerTime) > _nft.collateral.buffering,
             "Can do not liquidate."
         );
-        // burn lToken
-        lToken.burn(_nft.lTokenId);
         // send collateral to lender
         IERC721(_nftToken).safeTransferFrom(
             address(this),
