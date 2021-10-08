@@ -54,6 +54,7 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 buffering;
         address erc20Token;
         bool accept;
+        bool cancel;
         uint256 lTokenId;
     }
 
@@ -291,9 +292,10 @@ contract Kyoko is Ownable, ERC721Holder {
         address _erc20Token
     ) external isPause checkWhiteList(_erc20Token) {
         NFT memory _nft = NftMap[_bTokenId];
-        require(!_nft.marks.isBorrow, "This collateral already borrowed");
         OFFER memory _offer = OfferMap[_bTokenId][msg.sender];
-        if (!_offer.accept) {
+        require(!_nft.marks.isBorrow, "This collateral already borrowed");
+        // A price greater than 0 indicates that a bid has been made => to cancel
+        if (_offer.price > 0) {
             cancelOffer(_bTokenId);
         }
         uint256 _lTokenId = lToken.mint(msg.sender); // mint lToken
@@ -310,6 +312,7 @@ contract Kyoko is Ownable, ERC721Holder {
             _buffering,
             _erc20Token,
             false,
+            false,
             _lTokenId
         );
         OfferMap[_bTokenId][msg.sender] = _off;
@@ -323,12 +326,14 @@ contract Kyoko is Ownable, ERC721Holder {
      */
 
     function cancelOffer(uint256 _bTokenId) public isPause {
-        OFFER memory _offer = OfferMap[_bTokenId][msg.sender];
-        require(!_offer.accept, "This offer already has accepted.");
+        OFFER storage _offer = OfferMap[_bTokenId][msg.sender];
+        require(!_offer.accept, "This offer already accepted.");
+        require(!_offer.cancel, "This offer already cancelled.");
         require(
             lToken.ownerOf(_offer.lTokenId) == msg.sender,
             "Not lToken owner"
         ); // Verify token owner
+        _offer.cancel = true;
         lToken.burn(_offer.lTokenId);
         uint256 _price = _offer.price.mul(10000 + fee).div(10000);
         IERC20(_offer.erc20Token).safeTransfer(msg.sender, _price);
@@ -348,7 +353,7 @@ contract Kyoko is Ownable, ERC721Holder {
             "Not bToken owner"
         );
         require(!_nft.marks.isBorrow, "This collateral already borrowed");
-        require(!_offer.accept, "This Offer out of date");
+        require(!_offer.cancel, "This Offer out of date");
         _offer.accept = true; // change offer status
         // change collateral status
         _nft.collateral.apy = _offer.apy;
@@ -487,9 +492,8 @@ contract Kyoko is Ownable, ERC721Holder {
             lToken.ownerOf(_nft.lTokenId) == msg.sender,
             "Not lToken owner"
         ); // Verify token owner
-        uint256 time = _nft.borrowTimestamp;
         require(
-            (block.timestamp - time) > _nft.collateral.period,
+            (block.timestamp - _nft.borrowTimestamp) > _nft.collateral.period,
             "Can do not execute emergency."
         ); // An emergency can be triggered after collateral period
         _nft.emergencyTimestamp = block.timestamp; // set collateral emergency timestamp
@@ -555,6 +559,8 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 _totalInterest = (_loanSeconds *
             _secondsInterest *
             _nft.collateral.price) / 10**18; // total interest
-        repayAmount = _totalInterest.add(_nft.collateral.price.mul(base).div(100));
+        repayAmount = _totalInterest.add(
+            _nft.collateral.price.mul(base).div(100)
+        );
     }
 }
