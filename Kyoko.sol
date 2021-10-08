@@ -303,7 +303,7 @@ contract Kyoko is Ownable, ERC721Holder {
             cancelOffer(_bTokenId);
         }
         uint256 _lTokenId = lToken.mint(msg.sender); // mint lToken
-        TokenMap[_lTokenId] = bTokenId;
+        TokenMap[_lTokenId] = _bTokenId;
         uint256 _amount = _price.mul(10000).div(10000 + fee);
         IERC20(_erc20Token).safeTransferFrom(
             address(msg.sender),
@@ -388,11 +388,11 @@ contract Kyoko is Ownable, ERC721Holder {
             _amount
         );
         uint256 _lTokenId = lToken.mint(msg.sender); // mint lToken
-        TokenMap[_lTokenId] = bTokenId;
+        TokenMap[_lTokenId] = _bTokenId;
         _nft.lTokenId = _lTokenId; // set collateral lTokenid
         _nft.lender = msg.sender;
-        emit Lend(_bTokenId);
-        _borrow(_bTokenId, _lTokenId); // borrow action
+        emit Lend(_bTokenId,_lTokenId);
+        _borrow(_bTokenId); // borrow action
     }
 
     function _borrow(uint256 _bTokenId) internal {
