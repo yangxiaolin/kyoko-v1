@@ -552,10 +552,9 @@ contract Kyoko is Ownable, ERC721Holder {
         uint256 _secondsInterest = _nft.collateral.apy.mul(10**16).div(
             yearSeconds
         );
-        uint256 _interest = _loanSeconds * _secondsInterest;
-        // uint256 _interest = (_loanSeconds *
-        //     _secondsInterest *
-        //     _nft.collateral.price) / 10**18; // total interest
-        repayAmount = _interest.add(_nft.collateral.price.mul(base).div(100));
+        uint256 _totalInterest = (_loanSeconds *
+            _secondsInterest *
+            _nft.collateral.price) / 10**18; // total interest
+        repayAmount = _totalInterest.add(_nft.collateral.price.mul(base).div(100));
     }
 }
