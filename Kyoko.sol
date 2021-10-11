@@ -74,8 +74,8 @@ contract Kyoko is Ownable, ERC721Holder {
 
     mapping(uint256 => NFT) public NftMap; // uint256 === btokenId(btokenId is a unique identifier)
     mapping(uint256 => mapping(uint256 => OFFER)) public OfferMap; //btokenId => ltokenId => Bidder(Only one offer can exist per person)
-    mapping(uint256 => OFFER) public LTokenMapOffer;
-    mapping(uint256 => uint256) public TokenMap; // lTokenId => bTokenId for find collateral
+    mapping(uint256 => OFFER) public LTokenMapOffer; // ltokenid => Offer (The token holder unilaterally searches for offer information
+    mapping(uint256 => uint256) public TokenMap; // lTokenId => bTokenId => collateral (The token holder unilaterally searches for collateral information
 
     event NFTReceived(
         address indexed operator,
@@ -259,7 +259,10 @@ contract Kyoko is Ownable, ERC721Holder {
         string memory _description
     ) external isPause checkWhiteList(_erc20Token) {
         NFT storage _nft = NftMap[_bTokenId];
-        require(bToken.ownerOf(_bTokenId) == msg.sender, "Not bToken owner");
+        require(
+            bToken.ownerOf(_bTokenId) == msg.sender && !_nft.marks.isBorrow,
+            "Not bToken owner"
+        );
         // change collateral status
         _nft.collateral.apy = _apy;
         _nft.collateral.price = _price;
@@ -312,13 +315,16 @@ contract Kyoko is Ownable, ERC721Holder {
     }
 
     /**
+     * @param _bTokenId For find Collateral.
      * @param _lTokenId For find Offer.
      * Offer not accepted executable
      * Destroy ltoken after execution
      */
 
-    function cancelOffer(uint256 _lTokenId) external isPause {
-        uint256 _bTokenId = TokenMap[_lTokenId];
+    function cancelOffer(uint256 _bTokenId, uint256 _lTokenId)
+        external
+        isPause
+    {
         OFFER storage _offer = OfferMap[_bTokenId][_lTokenId];
         require(!_offer.accept, "This offer already accepted.");
         require(!_offer.cancel, "This offer already cancelled.");
@@ -346,10 +352,7 @@ contract Kyoko is Ownable, ERC721Holder {
         NFT storage _nft = NftMap[_bTokenId];
         require(!_nft.marks.isBorrow, "This collateral already borrowed");
         OFFER storage _offer = OfferMap[_bTokenId][_lTokenId];
-        require(
-            bToken.ownerOf(_bTokenId) == msg.sender,
-            "Not bToken owner"
-        );
+        require(bToken.ownerOf(_bTokenId) == msg.sender, "Not bToken owner");
         require(!_offer.cancel, "This Offer out of date");
         _offer.accept = true; // change offer status
         LTokenMapOffer[_lTokenId] = _offer;
