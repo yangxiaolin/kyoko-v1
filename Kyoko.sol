@@ -84,7 +84,11 @@ contract Kyoko is Ownable, ERC721Holder {
         bytes data
     );
 
-    event Deposit(uint256 indexed _bTokenId);
+    event Deposit(
+        uint256 indexed _bTokenId,
+        uint256 indexed _nftId,
+        address indexed _nftAdr
+    );
 
     event Modify(uint256 indexed _bTokenId, address _holder);
 
@@ -236,7 +240,7 @@ contract Kyoko is Ownable, ERC721Holder {
             collateral: _collateral
         });
 
-        emit Deposit(_bTokenId);
+        emit Deposit(_bTokenId, _nftId, _nftAdr);
     }
 
     /**
