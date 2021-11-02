@@ -176,6 +176,10 @@ contract Kyoko is Ownable, ERC721Holder {
         emit AddWhiteList(_address);
     }
 
+    function getWhiteListLength() external view returns (uint256) {
+        return whiteList.length;
+    }
+
     function onERC721Received(
         address operator,
         address from,
